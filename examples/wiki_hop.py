@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from ts_browser_agent import Agent
 
-_START_URL = "https://en.wikipedia.org/wiki/Artificial_intelligence"
+_START_URL = "https://en.wikipedia.org/wiki/Noemvriana"
 _GOAL = (
     "Reach the Wikipedia article about Philosophy by repeatedly clicking the first "
     "link in the main article text of each page you land on. Ignore navigation bars, "
