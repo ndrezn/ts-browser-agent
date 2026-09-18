@@ -27,13 +27,8 @@ and the LangChain SDK. No third-party browser-agent package.
    > Go to https://en.wikipedia.org/wiki/Main_Page and open the article about the
    > Rosetta Stone. Tell me its first sentence.
 
-   > Search Google Flights for round-trip flights from Montreal to Cancún, departing
-   > 2027-01-15 and returning 2027-01-22, one adult in economy. Tell me the cheapest
-   > price shown.
-
-   Use concrete dates and places; the classifier cannot resolve "next month" or
-   "somewhere warm". Private, loopback, and cloud-metadata addresses are blocked before
-   any navigation.
+   > Find the cheapest direct flights between Montreal and Cancun for a Saturday-to-Saturday
+   > trip between December 2026 and February 2027.
 
 ## Why `langchain-typesafe`
 
