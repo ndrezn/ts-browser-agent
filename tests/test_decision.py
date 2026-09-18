@@ -78,3 +78,13 @@ def test_resolve_select_target_carries_option_value() -> None:
     decision = resolve_decision(answers, targets)
     assert decision.target is not None
     assert decision.target.option_value == "L"
+
+
+def test_link_href_is_offered_and_non_links_carry_none() -> None:
+    link = Element(id=4, role="button", kind="click", label="Microphone", current_value="", href="/wiki/Microphone")
+    anchor = Element(id=5, role="button", kind="click", label="5 Equipment", current_value="", href="#Equipment")
+    classifier, _ = build_classifier(_snapshot([CLICK, link, anchor]))
+    criteria = classifier.questions["click_target"].criteria  # type: ignore[union-attr]
+    assert criteria["4"] == {"label": "Microphone", "current_value": "", "href": "/wiki/Microphone"}
+    assert criteria["5"]["href"] == "#Equipment"  # type: ignore[index]
+    assert "href" not in criteria["1"]  # type: ignore[operator]

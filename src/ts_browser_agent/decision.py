@@ -73,10 +73,13 @@ class Decision:
 
 
 def _target_criteria(candidates: dict[str, Element]) -> dict[str, JsonValue]:
-    return {
-        key: {"label": element.label, "current_value": element.current_value}
-        for key, element in candidates.items()
-    }
+    criteria: dict[str, JsonValue] = {}
+    for key, element in candidates.items():
+        entry: dict[str, JsonValue] = {"label": element.label, "current_value": element.current_value}
+        if element.href is not None:
+            entry["href"] = element.href
+        criteria[key] = entry
+    return criteria
 
 
 def build_classifier(snapshot: Snapshot) -> tuple[TypeSafeClassifier, dict[Operation, dict[str, Element]]]:
@@ -134,6 +137,7 @@ def _classifier_state(snapshot: Snapshot, goal: str, history: list[str]) -> Stat
                 "role": element.role,
                 "label": element.label,
                 "current_value": element.current_value,
+                "href": element.href,
             }
             for element in snapshot.elements
         ],

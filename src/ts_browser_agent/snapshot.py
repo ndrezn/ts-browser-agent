@@ -110,7 +110,7 @@ _SNAPSHOT_JS = r"""
     const cy = rect.y + rect.height / 2;
     if (cx < 0 || cy < 0 || cx >= innerWidth || cy >= innerHeight) continue;
     const id = identify(el);
-    const label = accessibleName(el) || roleOf(el) || "element";
+    const label = (accessibleName(el) || roleOf(el) || "element").replace(/\s+/g, " ").trim();
     if (el.tagName === "SELECT") {
       for (const option of el.options) {
         if (elements.length >= 200) break;
@@ -132,6 +132,9 @@ _SNAPSHOT_JS = r"""
       kind: editable(el) ? "fill" : "click",
       label,
       current_value: "value" in el ? String(el.value) : "",
+      // The raw attribute, not the resolved URL: "#Equipment" says same-page anchor and
+      // "/wiki/Microphone" says where a link goes, which a label alone cannot.
+      href: el.tagName === "A" ? el.getAttribute("href") : null,
     });
   }
 
@@ -164,6 +167,7 @@ class Element(BaseModel):
     label: str
     current_value: str
     option_value: str | None = None
+    href: str | None = None
 
     @property
     def target_key(self) -> str:

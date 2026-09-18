@@ -108,11 +108,14 @@ class Browser:
         Raises:
             StalePage: If the target element is no longer actionable.
         """
+        # Scroll the document explicitly rather than via a wheel event at the mouse's
+        # last position: after clicking into a sidebar (Wikipedia's table of contents,
+        # say) the wheel scrolls that panel and the page never moves.
         if kind == "scroll_down":
-            self.page.mouse.wheel(0, 600)
+            self.page.evaluate("window.scrollBy(0, 600)")
             return
         if kind == "scroll_up":
-            self.page.mouse.wheel(0, -600)
+            self.page.evaluate("window.scrollBy(0, -600)")
             return
         if kind == "wait":
             self.page.wait_for_timeout(300)
