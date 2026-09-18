@@ -3,6 +3,8 @@
 A fast browser agent built on
 [`langchain-typesafe`](https://docs.langchain.com/oss/python/integrations/providers/typesafe)
 and the LangChain SDK. No third-party browser-agent package.
+
+Here, the agent plays the [Wikipedia Game](https://en.wikipedia.org/wiki/Wikipedia:Wiki_Game), going from [LangChain](https://en.wikipedia.org/wiki/LangChain) to [Microphone](https://en.wikipedia.org/wiki/Microphone):
 <a href="docs/wiki_game.mp4"><img src="docs/wiki_game.gif" alt="A recorded run of examples/wiki_game.py" width="100%" /></a>
 
 ## Quickstart: run it in LangSmith Studio
