@@ -5,7 +5,8 @@ import asyncio
 from ts_browser_agent import build_browser_agent
 
 agent = build_browser_agent()
-result = asyncio.run(agent.ainvoke({"messages": [("user", "Open https://example.com and find the pricing page.")]}))
+goal = "Find the pricing page.\\n\\nStart at https://example.com"
+result = asyncio.run(agent.ainvoke({"messages": [("user", goal)]}))
 print(result["messages"][-1].content)  # "DONE", "BLOCKED", or "STALLED: ..."
 ```
 
