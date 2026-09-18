@@ -2,9 +2,11 @@
 
 A fast browser agent built on
 [`langchain-typesafe`](https://docs.langchain.com/oss/python/integrations/providers/typesafe)
-and the LangChain SDK. No third-party browser-agent package.
+and the LangChain SDK. No third-party browser-agent package. The loop is LangChain's
+`create_agent`; TypeSafe is the model, and the browser actions are the tools.
 
 Here, the agent plays the [Wikipedia Game](https://en.wikipedia.org/wiki/Wikipedia:Wiki_Game), going from [LangChain](https://en.wikipedia.org/wiki/LangChain) to [Microphone](https://en.wikipedia.org/wiki/Microphone):
+
 <a href="docs/wiki_game.mp4"><img src="docs/wiki_game.gif" alt="A recorded run of examples/wiki_game.py" width="100%" /></a>
 
 ## Quickstart: run it in LangSmith Studio
@@ -20,8 +22,13 @@ Here, the agent plays the [Wikipedia Game](https://en.wikipedia.org/wiki/Wikiped
 3. Start the dev server:
 
    ```bash
-   uv run langgraph dev --allow-blocking
+   uv run langgraph dev
    ```
+
+   Studio loads two graphs. `browser` is a deep agent that plans and delegates each page
+   to the `browse_fast` tool. `browser_loop` is the browser agent itself, for watching
+   the classifier's decisions one tool call at a time; it holds one browser, so run one
+   goal at a time on it.
 
 4. Type a goal. The deep agent plans, hands each page to the `browse_fast` tool, and
    reports back. Each call opens a visible Chromium.
@@ -58,6 +65,9 @@ response.choices["operation"].choice            # "CLICK"
 response.choices["click_target"].probabilities  # {"21": 0.91, "14": 0.09}
 ```
 
+`TypeSafeBrowserModel` wraps that call as a chat model: each turn it reads the page from
+the last tool result and answers with one tool call, so `create_agent` runs it as it
+would any model.
 
 Docs: [provider guide](https://docs.langchain.com/oss/python/integrations/providers/typesafe)
 · [API reference](https://reference.langchain.com/python/integrations/langchain_typesafe/)
@@ -67,7 +77,7 @@ Docs: [provider guide](https://docs.langchain.com/oss/python/integrations/provid
 
 ## Use it as a utility
 
-The Studio graph is two importable pieces.
+Both Studio graphs are importable pieces.
 
 ### Wrap `browse_fast` in your own deep agent
 
@@ -80,32 +90,40 @@ from ts_browser_agent import make_browse_fast_tool
 
 browse_fast = make_browse_fast_tool()  # headless=True, allow_private=False by default
 agent = create_deep_agent(model="openai:gpt-5.5", tools=[browse_fast])
-agent.invoke({"messages": [("user", "Find the pricing page and summarize the tiers.")]})
+await agent.ainvoke({"messages": [("user", "Find the pricing page and summarize the tiers.")]})
 ```
 
 A call returns a status line plus the final page's visible text, so the caller can read
 a price or a title from it. `headless`, `allow_private`, and `text_model` are fixed
-when the tool is built; they are not tool arguments.
+when the tool is built; they are not tool arguments. Each call builds its own browser
+agent, so parallel calls do not share a browser.
 
-`url` comes from a model, so `ensure_navigable` checks it before any browser launches.
+`url` comes from a model, so the `open` tool checks it with `ensure_navigable` before
+any browser launches.
 
 See `examples/deep_agent.py`.
 
-### Drive `Agent` directly
+### Build the browser agent
 
-You get the per-step trace and the final status:
+`build_browser_agent()` returns the compiled `create_agent` graph. It is async-only:
+drive it with `ainvoke` or `astream`.
 
 ```python
-from ts_browser_agent import Agent
+import asyncio
+from ts_browser_agent import build_browser_agent
 
-with Agent(
-    "https://en.wikipedia.org/wiki/Main_Page",
-    "Open the article about the Rosetta Stone.",
-) as agent:
-    for state in agent.run():
-        print(state["step"], state["operation"], state["target"])
-    print(agent.status)
+agent = build_browser_agent()
+goal = "Open the article about the Rosetta Stone.\n\nStart at https://en.wikipedia.org/wiki/Main_Page"
+result = asyncio.run(agent.ainvoke({"messages": [("user", goal)]}))
+print(result["messages"][-1].content)  # "DONE", "BLOCKED", or "STALLED: ..."
 ```
+
+Name the start URL at the end of the goal. The classifier weighs the goal's opening
+heavily, and a goal that opens with the start page reads as anchored to it once the
+agent has moved on. `DONE` is the classifier's judgment, not a guarantee; verify before
+acting on it. Options: `max_steps`, `headless`, `allow_private` (permits a local dev
+server), and `snapshot_filter`, a hook applied to every observation before the model
+sees it — `examples/wiki_game.py` uses it to enforce the game's rules.
 
 ## Examples
 
@@ -113,10 +131,10 @@ Every example opens a visible browser so you can watch.
 
 | Example | Path | What it exercises |
 | --- | --- | --- |
-| `flight_search.py` | `Agent` | A long click/select chain on real dynamic UI (Google Flights). Search only; it never books |
-| `github_issue.py` | `Agent` | Structurally different UI at each step (tab, filter, list, issue) |
-| `wiki_hop.py` | `Agent` | The same decision (first link in body text) made correctly many times in a row |
-| `wiki_game.py` | `Agent` | Reach one article from another (`--start`, `--end`). The game's rules are enforced by filtering each snapshot in the example: no revisits, article links only, no search |
+| `flight_search.py` | agent | A long click/select chain on real dynamic UI (Google Flights). Search only; it never books |
+| `github_issue.py` | agent | Structurally different UI at each step (tab, filter, list, issue) |
+| `wiki_hop.py` | agent | The same decision (first link in body text) made correctly many times in a row |
+| `wiki_game.py` | agent | Reach one article from another (`--start`, `--end`). The game's rules live in a `snapshot_filter`: no revisits, article links only, no search |
 | `deep_agent.py` | deep agent | The minimal shape: one `browse_fast` call, one page-scoped goal |
 
 ```bash
@@ -129,4 +147,5 @@ The design follows [jev-ultrafast](https://github.com/browser-use/jev-ultrafast)
 Browser Use: one TypeSafe request per step, a small model for typed text only, no LLM
 reasoning per click. The instruction text in `decision.py` is adapted from it under the
 MIT license. The implementation is independent — Playwright rather than Browser
-Harness, `langchain-typesafe` rather than a custom client.
+Harness, `langchain-typesafe` rather than a custom client, and LangChain's
+`create_agent` as the loop.

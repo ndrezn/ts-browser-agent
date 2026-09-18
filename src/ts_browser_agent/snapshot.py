@@ -196,16 +196,16 @@ def _fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def read_snapshot(page: Any) -> Snapshot:
+async def aread_snapshot(page: Any) -> Snapshot:
     """Read the page once and return its indexed element table.
 
     Args:
-        page: A Playwright `Page` (or `async_api.Page`) that has finished loading.
+        page: A Playwright `async_api.Page` that has finished loading.
 
     Returns:
         The current snapshot, including a fingerprint used to detect staleness.
     """
-    raw = page.evaluate(_SNAPSHOT_JS)
+    raw = await page.evaluate(_SNAPSHOT_JS)
     elements = [Element.model_validate(el) for el in raw["elements"]]
     fingerprint = _fingerprint(
         {"url": raw["url"], "text": raw["text"], "elements": raw["elements"]}
@@ -221,4 +221,4 @@ def read_snapshot(page: Any) -> Snapshot:
     )
 
 
-__all__ = ["Element", "Snapshot", "read_snapshot"]
+__all__ = ["Element", "Snapshot", "aread_snapshot"]

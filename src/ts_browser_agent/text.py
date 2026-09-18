@@ -42,33 +42,31 @@ def _prompt(goal: str, element: Element, snapshot: Snapshot, history: list[str])
     )
 
 
-def _init_text_model(model: str | BaseChatModel) -> BaseChatModel:
+def resolve_text_model(model: str | BaseChatModel) -> BaseChatModel:
     """Build the text model, trimming reasoning effort on OpenAI's reasoning models.
 
-    Extracting one field's value needs no multi-step reasoning, and reasoning effort
-    is the dominant cost on this call: measured around 2.5s at the default effort
-    versus 1.2s at `"minimal"` for `gpt-5-mini`, on a call that otherwise sits on the
-    per-step critical path. Only applied to `openai:`-prefixed model strings — a
-    caller passing another provider, or a pre-built `BaseChatModel`, controls this
-    themselves.
+    Extracting one field's value needs no multi-step reasoning, and reasoning effort is
+    the dominant cost on this call: measured around 2.5s at the default effort versus
+    1.2s at `"minimal"` for `gpt-5-mini`, on a call that sits on the per-step critical
+    path. Only applied to `openai:`-prefixed model strings — a caller passing another
+    provider, or a pre-built `BaseChatModel`, controls this themselves.
     """
     if isinstance(model, str) and model.split(":", 1)[0] == "openai":
         return init_chat_model(model, reasoning_effort="minimal")
     return init_chat_model(model) if isinstance(model, str) else model
 
 
-def generate_field_text(
-    model: str | BaseChatModel,
+async def agenerate_field_text(
+    model: BaseChatModel,
     goal: str,
     element: Element,
     snapshot: Snapshot,
     history: list[str],
 ) -> str:
-    """Generate the text to type into `element`, synchronously.
+    """Generate the text to type into `element`.
 
     Args:
-        model: A chat model instance, or a model string accepted by `init_chat_model`.
-            Prefer a small, fast model — this call sits on the agent's critical path.
+        model: The chat model to use; see `resolve_text_model`.
         goal: The user's overall goal for the run.
         element: The `TYPE_TEXT` target chosen by `TypeSafeClassifier`.
         snapshot: The page snapshot the target was chosen from.
@@ -77,20 +75,19 @@ def generate_field_text(
     Returns:
         The text to type. Empty when the model could not determine a correct value.
     """
-    chat_model = _init_text_model(model)
-    structured = chat_model.with_structured_output(FieldText)
-    result = structured.invoke(
+    structured = model.with_structured_output(FieldText)
+    result = await structured.ainvoke(
         [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": _prompt(goal, element, snapshot, history)},
         ],
-        # This call runs nested inside a tool and inherits the graph run's callbacks,
-        # so LangGraph's `messages` stream (what Studio renders) would otherwise show
-        # every field value as its own AI message. The tag is
+        # This call runs nested inside the agent and inherits the run's callbacks, so
+        # LangGraph's `messages` stream (what Studio renders) would otherwise show every
+        # field value as its own AI message. The tag is
         # `langgraph.constants.TAG_NOSTREAM`; it only affects streaming, not tracing.
         config={"tags": ["nostream"]},
     )
     return result.text  # type: ignore[union-attr]
 
 
-__all__ = ["FieldText", "generate_field_text"]
+__all__ = ["FieldText", "agenerate_field_text", "resolve_text_model"]

@@ -1,28 +1,31 @@
-"""Expose `Agent` as a tool for a deep agent to call.
+"""Expose the browser agent as a tool for another agent to call.
 
-A deep agent's own model already plans across many tool calls and tracks progress
-toward a larger goal; it should not also decide each individual click. This tool keeps
-`Agent`'s fast, TypeSafe-classified step loop entirely inside one call: the deep agent
-supplies a page and a single page-scoped goal, and gets back a status report plus the
-visible text of the page the run ended on — enough to read a result (a price, a title,
-a confirmation message) without the deep agent ever touching the browser itself.
+A deep agent's own model already plans across many tool calls; it should not also decide
+each individual click. `browse_fast` runs a whole browser agent inside one call: the
+caller supplies a page and a page-scoped goal and gets back a status line plus the
+visible text of the page the run ended on.
 
 ```python
 from deepagents import create_deep_agent
-from ts_browser_agent.tool import make_browse_fast_tool
+from ts_browser_agent import make_browse_fast_tool
 
-browse_fast = make_browse_fast_tool()
-agent = create_deep_agent(model="openai:gpt-5.5", tools=[browse_fast])
+agent = create_deep_agent(model="openai:gpt-5.5", tools=[make_browse_fast_tool()])
 ```
 """
 
 from __future__ import annotations
 
+import asyncio
+
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from ts_browser_agent.agent import Agent
+from ts_browser_agent.agent import build_browser_agent
+from ts_browser_agent.model import message_text
+from ts_browser_agent.snapshot import Snapshot
+from ts_browser_agent.tools import BrowserSession
 
 _MAX_REPORTED_TEXT = 3000
 
@@ -39,7 +42,7 @@ _TOOL_DESCRIPTION = (
 
 
 class BrowseFastInput(BaseModel):
-    """Arguments a deep agent supplies to the `browse_fast` tool."""
+    """Arguments the calling agent supplies to `browse_fast`."""
 
     url: str = Field(description="Page to start from.")
     goal: str = Field(
@@ -48,6 +51,29 @@ class BrowseFastInput(BaseModel):
     max_steps: int = Field(
         default=40, ge=1, le=200, description="Upper bound on attempts before giving up, at most 200."
     )
+
+
+def _status(outcome: str) -> str:
+    if outcome == "DONE":
+        return "done"
+    if outcome.startswith("STALLED"):
+        return "stalled"
+    return "blocked"
+
+
+def _report(messages: list[BaseMessage]) -> str:
+    outcome = next(
+        (message_text(m.content) for m in reversed(messages) if isinstance(m, AIMessage) and not m.tool_calls),
+        "",
+    )
+    snapshot = next(
+        (m.artifact for m in reversed(messages) if isinstance(m, ToolMessage) and isinstance(m.artifact, Snapshot)),
+        None,
+    )
+    status = f"status={_status(outcome)} outcome={outcome!r}"
+    if snapshot is None:
+        return status
+    return f"{status} final_url={snapshot.url}\n\nVisible page text at the end of the run:\n{snapshot.text[:_MAX_REPORTED_TEXT]}"
 
 
 def make_browse_fast_tool(
@@ -59,42 +85,33 @@ def make_browse_fast_tool(
     """Build a `browse_fast` tool bound to one text model, headless setting, and URL policy.
 
     `allow_private` and `headless` are fixed when the tool is built, not exposed to the
-    calling model — a prompt-injected page must not be able to talk the deep agent into
-    loosening the URL policy through tool-call arguments.
+    calling model — a prompt-injected page must not be able to talk the caller into
+    loosening the URL policy through tool-call arguments. Each call builds its own
+    browser agent, so parallel calls do not share a browser.
 
     Args:
         text_model: Chat model used only for `TYPE_TEXT` field values.
-        headless: Whether the underlying browser runs headless. Defaults to `True`,
-            unlike `Agent` itself, since deep agents typically run unattended.
+        headless: Whether the browser runs headless. Defaults to `True`, unlike
+            `build_browser_agent`, since calling agents typically run unattended.
         allow_private: Allow navigation to loopback and private addresses. Leave this
-            `False` unless every caller of the resulting tool is trusted, since it
-            widens what a prompt-injected goal could reach.
-
-    Returns:
-        A `StructuredTool` suitable for `create_agent`/`create_deep_agent`'s `tools`.
+            `False` unless every caller of the resulting tool is trusted.
     """
 
+    async def _arun(url: str, goal: str, max_steps: int = 40) -> str:
+        session = BrowserSession(headless=headless, allow_private=allow_private)
+        agent = build_browser_agent(text_model=text_model, max_steps=max_steps, session=session)
+        try:
+            result = await agent.ainvoke({"messages": [HumanMessage(f"{goal}\n\nStart at {url}")]})
+        finally:
+            await session.close()
+        return _report(result["messages"])
+
     def _run(url: str, goal: str, max_steps: int = 40) -> str:
-        with Agent(
-            url,
-            goal,
-            text_model=text_model,
-            max_steps=max_steps,
-            headless=headless,
-            allow_private=allow_private,
-        ) as agent:
-            steps = list(agent.run())
-            page_text = agent.browser.observe().text
-        last = steps[-1] if steps else None
-        status_line = (
-            f"status={agent.status} steps_taken={len(steps)} "
-            f"final_url={last['url'] if last else url!r} "
-            f"last_operation={last['operation'] if last else None}"
-        )
-        return f"{status_line}\n\nVisible page text at the end of the run:\n{page_text[:_MAX_REPORTED_TEXT]}"
+        return asyncio.run(_arun(url, goal, max_steps))
 
     return StructuredTool.from_function(
         func=_run,
+        coroutine=_arun,
         name="browse_fast",
         description=_TOOL_DESCRIPTION,
         args_schema=BrowseFastInput,

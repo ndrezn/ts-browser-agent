@@ -4,6 +4,9 @@ Every action re-resolves its element from the snapshot's node-identity map and r
 visibility and occlusion immediately before acting, rather than trusting geometry read
 during the snapshot. A `StalePage` means the page changed since the decision was made
 and the caller should re-observe instead of retrying blindly.
+
+Async throughout: the loop runs under `create_agent`, whose tool node awaits async tools
+on the event loop, and Playwright's sync API cannot be driven across threads.
 """
 
 from __future__ import annotations
@@ -11,10 +14,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from ts_browser_agent.safety import ensure_navigable
-from ts_browser_agent.snapshot import Snapshot, read_snapshot
+from ts_browser_agent.snapshot import Snapshot, aread_snapshot
 
 if TYPE_CHECKING:
-    from playwright.sync_api import Page as SyncPage
+    from playwright.async_api import Browser as PlaywrightBrowser
+    from playwright.async_api import Page, Playwright
 
 ActionKind = Literal["click", "fill", "select", "scroll_down", "scroll_up", "wait"]
 
@@ -67,42 +71,46 @@ def _check(result: dict[str, Any]) -> None:
         raise StalePage(f"Element is no longer actionable: {result['reason']}.")
 
 
-class Browser:
-    """Owns one Playwright page for the lifetime of an `Agent` run."""
+class AsyncBrowser:
+    """Owns one Playwright page for the lifetime of a run. Build it with `create`."""
 
-    def __init__(self, url: str, *, headless: bool = False, allow_private: bool = False) -> None:
-        from playwright.sync_api import sync_playwright
+    def __init__(self, playwright: Playwright, browser: PlaywrightBrowser, page: Page) -> None:
+        self._playwright = playwright
+        self._browser = browser
+        self.page = page
+
+    @classmethod
+    async def create(cls, url: str, *, headless: bool = False, allow_private: bool = False) -> AsyncBrowser:
+        """Launch Chromium and open `url`, after the URL passes `ensure_navigable`."""
+        from playwright.async_api import async_playwright
 
         ensure_navigable(url, allow_private=allow_private)
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=headless)
-        self.page: SyncPage = self._browser.new_page()
-        self.page.goto(url, wait_until="load")
+        playwright = await async_playwright().start()
+        browser = await playwright.chromium.launch(headless=headless)
+        page = await browser.new_page()
+        await page.goto(url, wait_until="load")
+        return cls(playwright, browser, page)
 
-    def observe(self) -> Snapshot:
+    async def observe(self) -> Snapshot:
         """Read the current page into an indexed snapshot.
 
-        Retries briefly on a transient Playwright error, since the previous step's
-        action (a submit click, following a link) may have just triggered a
-        navigation that is still settling when this is called.
+        Retries briefly on a transient Playwright error, since the previous action (a
+        submit click, following a link) may have just triggered a navigation that is
+        still settling when this is called.
         """
-        from playwright.sync_api import Error as PlaywrightError
+        from playwright.async_api import Error as PlaywrightError
 
         last_error: PlaywrightError | None = None
         for _ in range(10):
             try:
-                return read_snapshot(self.page)
+                return await aread_snapshot(self.page)
             except PlaywrightError as error:
                 last_error = error
-                self.page.wait_for_timeout(50)
+                await self.page.wait_for_timeout(50)
         assert last_error is not None
         raise last_error
 
-    def fresh(self, snapshot: Snapshot) -> bool:
-        """Return whether the page still matches a previously observed snapshot."""
-        return self.observe().fingerprint == snapshot.fingerprint
-
-    def act(self, *, kind: ActionKind, node_id: int | None = None, value: str | None = None) -> None:
+    async def act(self, *, kind: ActionKind, node_id: int | None = None, value: str | None = None) -> None:
         """Execute one resolved action, re-validating the target immediately before it runs.
 
         Raises:
@@ -112,34 +120,34 @@ class Browser:
         # last position: after clicking into a sidebar (Wikipedia's table of contents,
         # say) the wheel scrolls that panel and the page never moves.
         if kind == "scroll_down":
-            self.page.evaluate("window.scrollBy(0, 600)")
+            await self.page.evaluate("window.scrollBy(0, 600)")
             return
         if kind == "scroll_up":
-            self.page.evaluate("window.scrollBy(0, -600)")
+            await self.page.evaluate("window.scrollBy(0, -600)")
             return
         if kind == "wait":
-            self.page.wait_for_timeout(300)
+            await self.page.wait_for_timeout(300)
             return
-        if node_id is None:  # pragma: no cover - guarded by decision.py
+        if node_id is None:  # pragma: no cover - the tools always pass one
             message = f"Action kind {kind!r} requires a target element."
             raise ValueError(message)
         if kind == "select":
-            result = self.page.evaluate(_RESOLVE_AND_ACT_JS, {"id": node_id, "kind": kind, "value": value})
+            result = await self.page.evaluate(_RESOLVE_AND_ACT_JS, {"id": node_id, "kind": kind, "value": value})
             _check(result)
             return
-        result = self.page.evaluate(_RESOLVE_AND_ACT_JS, {"id": node_id, "kind": kind, "value": None})
+        result = await self.page.evaluate(_RESOLVE_AND_ACT_JS, {"id": node_id, "kind": kind, "value": None})
         _check(result)
-        self.page.mouse.click(result["x"], result["y"])
+        await self.page.mouse.click(result["x"], result["y"])
         if kind == "fill" and value is not None:
-            self.page.keyboard.press("ControlOrMeta+A")
-            self.page.keyboard.type(value)
+            await self.page.keyboard.press("ControlOrMeta+A")
+            await self.page.keyboard.type(value)
             # A combobox's suggestion list is a network round trip away; without this,
             # the very next snapshot can miss it entirely and the loop just retypes.
-            self.page.wait_for_timeout(250)
+            await self.page.wait_for_timeout(250)
 
-    def close(self) -> None:
-        self._browser.close()
-        self._playwright.stop()
+    async def close(self) -> None:
+        await self._browser.close()
+        await self._playwright.stop()
 
 
-__all__ = ["ActionKind", "Browser", "StalePage"]
+__all__ = ["ActionKind", "AsyncBrowser", "StalePage"]

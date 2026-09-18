@@ -1,7 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "browser": "./src/ts_browser_agent/studio.py:graph"
+    "browser": "./src/ts_browser_agent/studio.py:graph",
+    "browser_loop": "./src/ts_browser_agent/studio.py:loop"
   },
   "env": ".env"
 }

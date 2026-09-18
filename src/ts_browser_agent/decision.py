@@ -163,11 +163,11 @@ def resolve_decision(
     return Decision(operation=operation, target=element, confidence=target_answer.confidence)
 
 
-def decide(snapshot: Snapshot, goal: str, history: list[str]) -> Decision:
-    """Classify the current snapshot and resolve one decision, synchronously."""
+async def adecide(snapshot: Snapshot, goal: str, history: list[str]) -> Decision:
+    """Classify the current snapshot and resolve one decision."""
     classifier, targets = build_classifier(snapshot)
-    response = classifier.invoke(_classifier_state(snapshot, goal, history))
+    response = await classifier.ainvoke(_classifier_state(snapshot, goal, history))
     return resolve_decision(response.choices, targets)
 
 
-__all__ = ["Decision", "Operation", "build_classifier", "decide", "resolve_decision"]
+__all__ = ["Decision", "Operation", "adecide", "build_classifier", "resolve_decision"]

@@ -1,8 +1,8 @@
-"""Expose the deep agent as a LangGraph graph for LangSmith Studio.
+"""The graphs LangSmith Studio loads via `langgraph dev` (see `langgraph.json`).
 
-`langgraph dev` loads `graph` from here (see `langgraph.json` at the project root), so
-goals can be typed into the Studio UI instead of hardcoded in an example script. Same
-shape as the examples: the deep agent plans and delegates each page to `browse_fast`.
+`graph` is the deep agent: it plans and delegates each page to `browse_fast`. `loop` is
+the browser agent itself, for watching the classifier's decisions one tool call at a
+time; it holds one browser, so run one goal at a time on it.
 
 Usage:
     uv run langgraph dev
@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from deepagents import create_deep_agent
 
+from ts_browser_agent.agent import build_browser_agent
 from ts_browser_agent.tool import make_browse_fast_tool
 
 _SYSTEM_PROMPT = (
@@ -36,4 +37,6 @@ graph = create_deep_agent(
     system_prompt=_SYSTEM_PROMPT,
 )
 
-__all__ = ["graph"]
+loop = build_browser_agent(headless=False)
+
+__all__ = ["graph", "loop"]
