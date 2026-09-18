@@ -3,17 +3,7 @@
 A fast browser agent built on
 [`langchain-typesafe`](https://docs.langchain.com/oss/python/integrations/providers/typesafe)
 and the LangChain SDK. No third-party browser-agent package.
-
-Each step turns the page into a numbered table of interactive elements and sends
-TypeSafe one request. It asks which operation comes next
-(`CLICK`/`TYPE_TEXT`/`SELECT`/`SCROLL_UP`/`SCROLL_DOWN`/`WAIT`/`DONE`/`BLOCKED`) and,
-speculatively, which element each operation would target. One round trip, one decision.
-A small chat model runs only for `TYPE_TEXT`, to produce the value to type.
-
 <a href="docs/wiki_game.mp4"><img src="docs/wiki_game.gif" alt="A recorded run of examples/wiki_game.py" width="100%" /></a>
-
-A recorded run of `examples/wiki_game.py`: reach one Wikipedia article from another by
-clicking article links only. [Watch the video](docs/wiki_game.mp4).
 
 ## Quickstart: run it in LangSmith Studio
 
@@ -71,18 +61,6 @@ response.choices["operation"].choice            # "CLICK"
 response.choices["click_target"].probabilities  # {"21": 0.91, "14": 0.09}
 ```
 
-Criteria are rebuilt from the live DOM each step, up to 255 per question. The target
-questions ride along with the operation question, so a decision is one round trip:
-about 300ms here, against 1.2–2.5s for the loop's single chat-model call.
-
-Answers are indices into a list the code built, so model output never becomes a
-selector. This project only uses `Choice`; the package also has `Noul` (yes/no) and
-`Score` (rubric). The classifier is a normal `Runnable`, so `ainvoke`, `batch`,
-callbacks, and LangSmith tracing all work.
-
-```bash
-uv add langchain-typesafe
-```
 
 Docs: [provider guide](https://docs.langchain.com/oss/python/integrations/providers/typesafe)
 · [API reference](https://reference.langchain.com/python/integrations/langchain_typesafe/)
@@ -97,8 +75,7 @@ The Studio graph is two importable pieces.
 ### Wrap `browse_fast` in your own deep agent
 
 `make_browse_fast_tool()` returns a LangChain tool for `create_agent` or
-`create_deep_agent`. The outer model decides when to browse and with what goal; the
-clicks stay with the classifier loop.
+`create_deep_agent`.
 
 ```python
 from deepagents import create_deep_agent
@@ -114,9 +91,6 @@ a price or a title from it. `headless`, `allow_private`, and `text_model` are fi
 when the tool is built; they are not tool arguments.
 
 `url` comes from a model, so `ensure_navigable` checks it before any browser launches.
-Private and loopback addresses are blocked unless `allow_private=True`. Link-local
-addresses, which include cloud metadata endpoints, are always blocked. A prompt-injected
-page cannot change this.
 
 See `examples/deep_agent.py`.
 
@@ -136,10 +110,6 @@ with Agent(
     print(agent.status)
 ```
 
-`DONE` is the classifier's judgment, not a guarantee; verify before acting on it.
-`allow_private=True` permits a local dev server. See `examples/flight_search.py`,
-`github_issue.py`, `wiki_hop.py`, and `wiki_game.py`.
-
 ## Examples
 
 Every example opens a visible browser so you can watch.
@@ -155,29 +125,6 @@ Every example opens a visible browser so you can watch.
 ```bash
 uv run --env-file .env python examples/wiki_game.py --start "Jimmy Page" --end Microphone
 ```
-
-## Layout
-
-| File | Job |
-| --- | --- |
-| `snapshot.py` | Indexed DOM read: assigns stable ids to interactive elements |
-| `decision.py` | Builds the per-step `TypeSafeClassifier` and resolves its answer |
-| `text.py` | Small-model text generation for `TYPE_TEXT`, kept out of the decision path |
-| `browser.py` | Playwright execution, re-validating each target immediately before acting |
-| `safety.py` | SSRF guard applied to every navigation, since `url` may come from an LLM |
-| `agent.py` | The step loop tying the above together |
-| `tool.py` | Wraps `Agent` as a `browse_fast` tool for `create_agent`/`create_deep_agent` |
-| `studio.py` | Exposes the deep agent as a `graph` for `langgraph dev` / LangSmith Studio |
-
-## Tests
-
-```bash
-uv run pytest
-```
-
-Offline: dummy credentials, no browser, no network. They cover the SSRF guard,
-classifier construction and resolution, snapshot indexing, the step loop's stall and
-budget rules, and the tool's input bounds.
 
 ## Credits
 
