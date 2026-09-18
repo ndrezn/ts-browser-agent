@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "browser": "./src/ts_browser_agent/studio.py:graph"
+  },
+  "env": ".env"
+}
